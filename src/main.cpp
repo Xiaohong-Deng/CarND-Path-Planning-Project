@@ -202,11 +202,14 @@ int main() {
     map_waypoints_dy.push_back(d_y);
   }
 
+  // at the very beginning the ego car starts from lane 1
   int lane = 1;
   // velocity to start with in each cycle
-  double ref_vel = 0;
+  double ref_vel = 0.0;
+  // whether or not the car is in the state of lane changing
+//  bool change_lane = false;
 
-  h.onMessage([&map_waypoints_x,&map_waypoints_y,&map_waypoints_s,&map_waypoints_dx,&map_waypoints_dy](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
+  h.onMessage([&lane, &ref_vel, &map_waypoints_x,&map_waypoints_y,&map_waypoints_s,&map_waypoints_dx,&map_waypoints_dy](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
                      uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
@@ -224,7 +227,7 @@ int main() {
         
         if (event == "telemetry") {
           // j[1] is the data JSON object
-          
+
           // Main car's localization Data
           double car_x = j[1]["x"];
           double car_y = j[1]["y"];
@@ -247,6 +250,11 @@ int main() {
 
           json msgJson;
 
+          double car_s_now = car_s;
+          double front_gap_zero = 6945;
+          double front_gap_one = 6945;
+          double front_gap_two = 6945;
+
           if (prev_size > 0) {
             car_s = end_path_s;
           }
@@ -256,22 +264,52 @@ int main() {
           // check other cars one by one
           for (int i = 0; i < sensor_fusion.size(); i++) {
             float d = sensor_fusion[i][6];
+            double check_car_s = sensor_fusion[i][5];
+            bool in_my_lane = d < (2 + 4 * lane + 2) && d > (2 + 4 * lane - 2);
+            bool in_lane_zero = d < 4 && d > 0;
+            bool in_lane_one = d < 8 && d > 4;
+            bool in_lane_two = d < 12 && d > 8;
+            double gap = check_car_s - car_s_now;
+
+            if (in_lane_zero && gap > 0 && gap < front_gap_zero) {
+              front_gap_zero = gap;
+            } else if (in_lane_one && gap > 0 && gap < front_gap_one) {
+              front_gap_one = gap;
+            } else if (in_lane_two && gap > 0 && gap < front_gap_two) {
+              front_gap_two = gap;
+            }
             // if car is in my lane
-            if (d < (2 + 4 * lane + 2) && d > (2 + 4 * lane -2)) {
+            if (in_my_lane) {
               double vx = sensor_fusion[i][3];
               double vy = sensor_fusion[i][4];
               double check_speed = sqrt(vx * vx + vy * vy);
-              double check_car_s = sensor_fusion[i][5];
 
               // if car_s is at end_path_s, then check_car_s should be as follows
               check_car_s += (double) prev_size * .02 * check_speed;
 
-              if (check_car_s > car_s && (check_car_s - car_s < 30)) {
+              if (check_car_s > car_s && (check_car_s - car_s < 20)) {
                 // TODO: do some logic here. either lower the velocity or try to change lane
                 too_close = true;
+                // if too close and not in lane change mode
+                if (lane == 2) {
+                  lane -= 1;
+                } else {
+                  lane += 1;
+                }
+//                if (!change_lane) {
+//                  BF bf;
+//                  int intended_lane = bf.opt_lane();
+//                  if (intended_lane == lane) {
+//
+//                  }
+//                }
               }
             }
           }
+
+          cout << "distance to the closest front car in lane 0: " << front_gap_zero << endl;
+          cout << "distance to the closest front car in lane 1: " << front_gap_one << endl;
+          cout << "distance to the closest front car in lane 2: " << front_gap_two << endl;
 
           if (too_close) {
             ref_vel -= .224;
@@ -313,9 +351,14 @@ int main() {
             ptsy.push_back(ref_y);
           }
 
-          vector<double> next_wp0 = getXY(car_s + 30, (2 + 4 * lane), map_waypoints_s, map_waypoints_x, map_waypoints_y);
-          vector<double> next_wp1 = getXY(car_s + 60, (2 + 4 * lane), map_waypoints_s, map_waypoints_x, map_waypoints_y);
-          vector<double> next_wp2 = getXY(car_s + 90, (2 + 4 * lane), map_waypoints_s, map_waypoints_x, map_waypoints_y);
+          int anchor_gap = 30;
+          if (ref_vel < 40) {
+            anchor_gap = 20;
+          }
+
+          vector<double> next_wp0 = getXY(car_s + anchor_gap, (2 + 4 * lane), map_waypoints_s, map_waypoints_x, map_waypoints_y);
+          vector<double> next_wp1 = getXY(car_s + anchor_gap * 2, (2 + 4 * lane), map_waypoints_s, map_waypoints_x, map_waypoints_y);
+          vector<double> next_wp2 = getXY(car_s + anchor_gap * 3, (2 + 4 * lane), map_waypoints_s, map_waypoints_x, map_waypoints_y);
 
           ptsx.push_back(next_wp0[0]);
           ptsx.push_back(next_wp1[0]);
@@ -336,11 +379,16 @@ int main() {
 
           tk::spline s;
 
-          // we fit the spline with only 5 points, 3 of them are the same lane, straight line
+          // we fit the spline with only 5 points, 3 of them are on the same lane, straight line
           s.set_points(ptsx, ptsy);
 
           vector<double> next_x_vals;
           vector<double> next_y_vals;
+
+          for (int i = 0; i < prev_size; i++) {
+            next_x_vals.push_back(previous_path_x[i]);
+            next_y_vals.push_back(previous_path_y[i]);
+          }
 
           double target_x = 30.0;
           double target_y = s(target_x);
@@ -348,7 +396,7 @@ int main() {
 
           double x_add_on = 0;
 
-          for (int i = 0; i < previous_path_x.size(); i++) {
+          for (int i = 0; i < 50 - previous_path_x.size(); i++) {
             // evenly space out N points in the 30 meters range on the spline
             // remember we are in the vehicle coordinate system
             double N = target_dist / (.02 * ref_vel / 2.24);
@@ -372,6 +420,9 @@ int main() {
           }
 
           //END
+//          cout << previous_path_x.size() << endl;
+//          cout << next_x_vals.size() << endl;
+//          cout << next_x_vals[0];
           msgJson["next_x"] = next_x_vals;
           msgJson["next_y"] = next_y_vals;
 
