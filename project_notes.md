@@ -35,6 +35,11 @@ It is a piecewise curve you fit with a bunch of anchor points. The pieces are fo
 
 The farther away the anchor points are to each other, the smoother the curve is. This is important to lane change. If car speed is high a steep curve will cause an abrupt change in vehicle's heading thus exceeds the maximum angular acceleration.
 
+## s coordinate
+s values for the ego car and the surrounding cars are from 0 to infinity. That is, if a car have looped for once its s value is greater than 3945. This is useful when you want to calculate the distance between two cars. e.g. s = fmod(s, max_s). This applies to `end_path_s`, too.
+
+s values for surrounding cars starts off large, e.g. 6000+ meter or so. But they become normal quickly and grow incrementally since.
+
 ## 3-module structure
 ### Predictor
 **TL;DR Predictor can be skipped in this assignment.**
