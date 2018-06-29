@@ -332,11 +332,6 @@ int main() {
                 // TODO: do some logic here. either lower the velocity or try to change lane
                 too_close = true;
                 // if too close and not in lane change mode
-                if (lane == 2) {
-                  lane -= 1;
-                } else {
-                  lane += 1;
-                }
               }
             }
           }
@@ -348,10 +343,43 @@ int main() {
           cout << "distance to the closest rear car in lane 1: " << rear_gap_one << endl;
           cout << "distance to the closest rear car in lane 2: " << rear_gap_two << endl;
 
+          // Behavior Planning happens here
+          // by default the ego car is in keep lane mode
+          // the following branch includes prepare for lane change (slow down to keep distance)
+          // and lane change
           if (too_close) {
             ref_vel -= .224;
+
+            if (lane == 0) {
+              if (front_gap_one > 40 && rear_gap_one < 20) {
+                lane += 1;
+              }
+            } else if (lane == 1) {
+              bool is_zero_feasible = front_gap_zero > 40 && rear_gap_zero < 20;
+              bool is_two_feasible = front_gap_two > 40 && rear_gap_two < 20;
+              bool is_both_feasible = is_zero_feasible && is_two_feasible;
+
+              if (is_both_feasible) {
+                lane = (front_gap_zero > front_gap_two) ? 0 : 2;
+              } else if (is_zero_feasible) {
+                lane = 0;
+              } else if (is_two_feasible) {
+                lane = 2;
+              }
+            } else {
+              if (front_gap_one > 40 && rear_gap_one < 20) {
+                lane -= 1;
+              }
+            }
           } else if (ref_vel < 49.5) {
             ref_vel += .224;
+          } else if (lane != 1) {
+            // lane 1 has two possible lanes to switch to
+            // I reason that it has a priority. switch to it if possible
+            // even if the current lane is wide open
+            if (front_gap_one > 70 && rear_gap_one < 20) {
+              lane = 1;
+            }
           }
 
           //
@@ -455,11 +483,8 @@ int main() {
             next_x_vals.push_back(x_pt);
             next_y_vals.push_back(y_pt);
           }
-
           //END
-//          cout << previous_path_x.size() << endl;
-//          cout << next_x_vals.size() << endl;
-//          cout << next_x_vals[0];
+
           msgJson["next_x"] = next_x_vals;
           msgJson["next_y"] = next_y_vals;
 
