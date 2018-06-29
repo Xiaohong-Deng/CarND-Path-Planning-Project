@@ -209,7 +209,7 @@ int main() {
   // whether or not the car is in the state of lane changing
 //  bool change_lane = false;
 
-  h.onMessage([&lane, &ref_vel, &map_waypoints_x,&map_waypoints_y,&map_waypoints_s,&map_waypoints_dx,&map_waypoints_dy](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
+  h.onMessage([&max_s, &lane, &ref_vel, &map_waypoints_x,&map_waypoints_y,&map_waypoints_s,&map_waypoints_dx,&map_waypoints_dy](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
                      uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
@@ -250,34 +250,66 @@ int main() {
 
           json msgJson;
 
-          double car_s_now = car_s;
-          double front_gap_zero = 6945;
-          double front_gap_one = 6945;
-          double front_gap_two = 6945;
+          double car_s_now = fmod(car_s, max_s);
+
+          double front_gap_zero = max_s;
+          double front_gap_one = max_s;
+          double front_gap_two = max_s;
+
+          double rear_gap_zero = -max_s;
+          double rear_gap_one = -max_s;
+          double rear_gap_two = -max_s;
 
           if (prev_size > 0) {
             car_s = end_path_s;
           }
 
           bool too_close = false;
+          car_s = fmod(car_s, max_s);
 
           // check other cars one by one
           for (int i = 0; i < sensor_fusion.size(); i++) {
             float d = sensor_fusion[i][6];
             double check_car_s = sensor_fusion[i][5];
+            check_car_s = fmod(check_car_s, max_s);
+
+            // I want to check the gap size between me and the car in front of me
+            // in 3 lanes
             bool in_my_lane = d < (2 + 4 * lane + 2) && d > (2 + 4 * lane - 2);
             bool in_lane_zero = d < 4 && d > 0;
             bool in_lane_one = d < 8 && d > 4;
             bool in_lane_two = d < 12 && d > 8;
-            double gap = check_car_s - car_s_now;
 
-            if (in_lane_zero && gap > 0 && gap < front_gap_zero) {
-              front_gap_zero = gap;
-            } else if (in_lane_one && gap > 0 && gap < front_gap_one) {
-              front_gap_one = gap;
-            } else if (in_lane_two && gap > 0 && gap < front_gap_two) {
-              front_gap_two = gap;
+            double gap = check_car_s - car_s_now;
+            // if the ego car is ahead of the surrounding car for more than half of the loop length
+            // we might as well consider that the ego car is behind the surrounding car
+            if (gap < - max_s / 2) {
+              gap = max_s + gap;
+            } else if (gap > max_s / 2) {
+              gap -= max_s;
             }
+
+            // update front gap or rear gap
+            if (gap > 0) {
+              if (in_lane_zero && gap < front_gap_zero) {
+                front_gap_zero = gap;
+              } else if (in_lane_one && gap < front_gap_one) {
+                front_gap_one = gap;
+              } else if (in_lane_two && gap < front_gap_two) {
+                front_gap_two = gap;
+              }
+            } else {
+              if (in_lane_zero && gap > rear_gap_zero) {
+                rear_gap_zero = gap;
+              } else if (in_lane_one && gap > rear_gap_one) {
+                rear_gap_one = gap;
+              } else if (in_lane_two && gap > rear_gap_two) {
+                rear_gap_two = gap;
+              }
+            }
+
+            // besides the front gap, I also want to check the feasibility of lane change
+
             // if car is in my lane
             if (in_my_lane) {
               double vx = sensor_fusion[i][3];
@@ -286,8 +318,17 @@ int main() {
 
               // if car_s is at end_path_s, then check_car_s should be as follows
               check_car_s += (double) prev_size * .02 * check_speed;
+              if (check_car_s > max_s) {
+                check_car_s -= max_s;
+              }
 
-              if (check_car_s > car_s && (check_car_s - car_s < 20)) {
+              gap = check_car_s - car_s;
+              if (gap < - max_s / 2) {
+                gap = max_s + gap;
+              }
+
+              // if the car is in front of me and too close
+              if (gap > 0 && gap < 20) {
                 // TODO: do some logic here. either lower the velocity or try to change lane
                 too_close = true;
                 // if too close and not in lane change mode
@@ -296,13 +337,6 @@ int main() {
                 } else {
                   lane += 1;
                 }
-//                if (!change_lane) {
-//                  BF bf;
-//                  int intended_lane = bf.opt_lane();
-//                  if (intended_lane == lane) {
-//
-//                  }
-//                }
               }
             }
           }
@@ -310,6 +344,9 @@ int main() {
           cout << "distance to the closest front car in lane 0: " << front_gap_zero << endl;
           cout << "distance to the closest front car in lane 1: " << front_gap_one << endl;
           cout << "distance to the closest front car in lane 2: " << front_gap_two << endl;
+          cout << "distance to the closest rear car in lane 0: " << rear_gap_zero << endl;
+          cout << "distance to the closest rear car in lane 1: " << rear_gap_one << endl;
+          cout << "distance to the closest rear car in lane 2: " << rear_gap_two << endl;
 
           if (too_close) {
             ref_vel -= .224;
