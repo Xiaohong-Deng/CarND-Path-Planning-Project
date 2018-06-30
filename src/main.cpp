@@ -347,16 +347,19 @@ int main() {
           // by default the ego car is in keep lane mode
           // the following branch includes prepare for lane change (slow down to keep distance)
           // and lane change
+          double ref_rear_gap = -10;
+          double ref_front_gap = 45;
+
           if (too_close) {
             ref_vel -= .224;
 
             if (lane == 0) {
-              if (front_gap_one > 40 && rear_gap_one < 20) {
+              if ((front_gap_one > ref_front_gap) && (rear_gap_one < ref_rear_gap)) {
                 lane += 1;
               }
             } else if (lane == 1) {
-              bool is_zero_feasible = front_gap_zero > 40 && rear_gap_zero < 20;
-              bool is_two_feasible = front_gap_two > 40 && rear_gap_two < 20;
+              bool is_zero_feasible = (front_gap_zero > ref_front_gap) && (rear_gap_zero < ref_rear_gap);
+              bool is_two_feasible = (front_gap_two > ref_front_gap) && (rear_gap_two < ref_rear_gap);
               bool is_both_feasible = is_zero_feasible && is_two_feasible;
 
               if (is_both_feasible) {
@@ -367,18 +370,22 @@ int main() {
                 lane = 2;
               }
             } else {
-              if (front_gap_one > 40 && rear_gap_one < 20) {
+              if ((front_gap_one > ref_front_gap) && (rear_gap_one < ref_rear_gap)) {
                 lane -= 1;
               }
             }
-          } else if (ref_vel < 49.5) {
-            ref_vel += .224;
-          } else if (lane != 1) {
+          } else {
+            if (ref_vel < 49.5) {
+              ref_vel += .224;
+            }
+
             // lane 1 has two possible lanes to switch to
             // I reason that it has a priority. switch to it if possible
             // even if the current lane is wide open
-            if (front_gap_one > 70 && rear_gap_one < 20) {
-              lane = 1;
+            if (lane != 1) {
+              if ((front_gap_one > ref_front_gap) && (rear_gap_one < ref_rear_gap)) {
+                lane = 1;
+              }
             }
           }
 
